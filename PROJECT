@@ -1,0 +1,16 @@
+domain: secrets-store.csi.x-k8s.io
+layout:
+- go.kubebuilder.io/v3
+projectName: secrets-store-controller
+repo: github.com/aramase/secrets-store-controller
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: secrets-store.csi.x-k8s.io
+  group: secrets-store.csi.x-k8s.io
+  kind: SecretProvider
+  path: github.com/aramase/secrets-store-controller/api/v1
+  version: v1
+version: "3"
