@@ -22,6 +22,8 @@ import (
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
+	"google.golang.org/grpc"
+	"k8s.io/client-go/kubernetes"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -30,9 +32,12 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	secretsstorecsiv1 "sigs.k8s.io/secrets-store-csi-driver/apis/v1"
 
 	secretsstorecsixk8siov1 "github.com/aramase/secrets-store-controller/api/v1"
 	"github.com/aramase/secrets-store-controller/controllers"
+	"github.com/aramase/secrets-store-controller/pkg/k8s"
+	"github.com/aramase/secrets-store-controller/pkg/provider"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -45,6 +50,7 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(secretsstorecsixk8siov1.AddToScheme(scheme))
+	utilruntime.Must(secretsstorecsiv1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 }
 
@@ -52,11 +58,16 @@ func main() {
 	var metricsAddr string
 	var enableLeaderElection bool
 	var probeAddr string
+	var providerVolumePath string
+	var maxCallRecvMsgSize int
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
+	flag.StringVar(&providerVolumePath, "provider-volume", "/var/run/secrets-store-csi-providers", "Volume path for provider.")
+	flag.IntVar(&maxCallRecvMsgSize, "max-call-recv-msg-size", 1024*1024*4, "maximum size in bytes of gRPC response from plugins")
+
 	opts := zap.Options{
 		Development: true,
 	}
@@ -89,9 +100,22 @@ func main() {
 		os.Exit(1)
 	}
 
+	// token request client
+	kubeClient := kubernetes.NewForConfigOrDie(ctrl.GetConfigOrDie())
+	tokenClient := k8s.NewTokenClient(kubeClient)
+	if err != nil {
+		setupLog.Error(err, "failed to create token client")
+		os.Exit(1)
+	}
+
+	providerClients := provider.NewPluginClientBuilder([]string{providerVolumePath}, grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(maxCallRecvMsgSize)))
+	defer providerClients.Cleanup()
+
 	if err = (&controllers.SecretProviderReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:          mgr.GetClient(),
+		Scheme:          mgr.GetScheme(),
+		TokenClient:     tokenClient,
+		ProviderClients: providerClients,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "SecretProvider")
 		os.Exit(1)

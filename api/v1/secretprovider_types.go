@@ -25,6 +25,30 @@ type SecretProviderSpec struct {
 	// ServiceAccountName is the name of the service account that will be used to
 	// access the secret store.
 	ServiceAccountName string `json:"serviceAccountName,omitempty"`
+	// SecretProviderClassName is the name of the secret provider class that will
+	// be used to access the secret store.
+	SecretProviderClassName string `json:"secretProviderClassName,omitempty"`
+	// RotationPollInterval is the interval at which the controller will poll the
+	// provider to get the latest secret version.
+	// Defaults to 2 minute.
+	// +optional
+	RotationPollInterval *metav1.Duration `json:"rotationPollInterval,omitempty"`
+	// TokenRequests is a list of token requests.
+	TokenRequests []TokenRequest `json:"tokenRequests,omitempty"`
+}
+
+// TokenRequest contains parameters of a service account token.
+type TokenRequest struct {
+	// Audience is the intended audience of the token in "TokenRequestSpec".
+	// It will default to the audiences of kube apiserver.
+	//
+	Audience string `json:"audience" protobuf:"bytes,1,opt,name=audience"`
+
+	// ExpirationSeconds is the duration of validity of the token in "TokenRequestSpec".
+	// It has the same default value of "ExpirationSeconds" in "TokenRequestSpec".
+	//
+	// +optional
+	ExpirationSeconds *int64 `json:"expirationSeconds,omitempty" protobuf:"varint,2,opt,name=expirationSeconds"`
 }
 
 // SecretProviderStatus defines the observed state of SecretProvider
