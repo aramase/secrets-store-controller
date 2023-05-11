@@ -31,11 +31,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	secretsstorecsiv1 "sigs.k8s.io/secrets-store-csi-driver/apis/v1"
-	"sigs.k8s.io/secrets-store-csi-driver/pkg/util/secretutil"
 
 	secretsstorecsixk8siov1 "github.com/aramase/secrets-store-controller/api/v1"
 	"github.com/aramase/secrets-store-controller/pkg/k8s"
 	"github.com/aramase/secrets-store-controller/pkg/provider"
+	"github.com/aramase/secrets-store-controller/pkg/util/secretutil"
 )
 
 const (
@@ -67,6 +67,7 @@ type SecretProviderReconciler struct {
 //+kubebuilder:rbac:groups=secrets-store.csi.x-k8s.io,resources=secretproviders/finalizers,verbs=update
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources="serviceaccounts/token",verbs=create
+//+kubebuilder:rbac:groups=secrets-store.csi.x-k8s.io,resources=secretproviderclasses,verbs=get;list;watch
 
 // Reconcile is called for a SecretProvider object
 func (r *SecretProviderReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -94,11 +95,12 @@ func (r *SecretProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	// get the secret provider class object
 	spc := &secretsstorecsiv1.SecretProviderClass{}
-	if err := r.Get(ctx, client.ObjectKey{Name: sp.Spec.SecretProviderClassName}, spc); err != nil {
+	if err := r.Get(ctx, client.ObjectKey{Name: sp.Spec.SecretProviderClassName, Namespace: req.Namespace}, spc); err != nil {
 		logger.Error(err, "failed to get secret provider class", "name", sp.Spec.SecretProviderClassName)
 		return ctrl.Result{}, err
 	}
 
+	logger.Info("got secret provider class", "name", sp.Spec.SecretProviderClassName, "namespace", req.Namespace)
 	// get the service account token
 	serviceAccountTokenAttrs, err := r.TokenClient.SecretProviderServiceAccountTokenAttrs(sp.Namespace, sp.Spec.ServiceAccountName, sp.Spec.TokenRequests)
 	if err != nil {
@@ -106,6 +108,7 @@ func (r *SecretProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err
 	}
 
+	logger.Info("got service account token", "name", sp.Spec.ServiceAccountName, "namespace", sp.Namespace, "tokenRequests", sp.Spec.TokenRequests)
 	// this is to mimic the parameters sent from CSI driver to the provider
 	parameters := make(map[string]string)
 	if spc.Spec.Parameters != nil {
@@ -149,6 +152,7 @@ func (r *SecretProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err
 	}
 
+	logger.Info("got provider client", "provider", providerName)
 	// TODO(aramase): handle object versions
 	_, files, err := provider.MountContent(ctx, providerClient, string(paramsJSON), string(secretsJSON), string(permissionJSON), map[string]string{})
 	if err != nil {
@@ -156,6 +160,7 @@ func (r *SecretProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err
 	}
 
+	logger.Info("got secrets from provider", "provider", providerName)
 	for _, secretObj := range spc.Spec.SecretObjects {
 		secretName := strings.TrimSpace(secretObj.SecretName)
 		if err := secretutil.ValidateSecretObject(*secretObj); err != nil {
@@ -170,13 +175,16 @@ func (r *SecretProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			return ctrl.Result{}, err
 		}
 
+		logger.Info("got secret data", "secretName", secretName)
 		// TODO(aramase): make this run in the background so that we don't fail creating other secrets
 		if err := r.createOrUpdateSecret(ctx, secretName, req.Namespace, datamap, secretType); err != nil {
 			logger.Error(err, "failed to create or update secret", "secretName", secretName)
 			return ctrl.Result{}, err
 		}
+		logger.Info("created or updated secret", "secretName", secretName)
 	}
 
+	logger.Info("queued for next rotation", "rotationPollInterval", sp.Spec.RotationPollInterval.Duration, "name", req.NamespacedName.String())
 	// set the next rotation time
 	return ctrl.Result{RequeueAfter: sp.Spec.RotationPollInterval.Duration}, nil
 }
@@ -187,7 +195,7 @@ func (r *SecretProviderReconciler) createOrUpdateSecret(ctx context.Context, nam
 			Namespace: namespace,
 			Name:      name,
 			Labels: map[string]string{
-				"created-by": "github.com/aramase/secrets-store-controller",
+				"created-by": "aramase.secrets-store-controller",
 			},
 		},
 		Type: secretType,

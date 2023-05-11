@@ -222,7 +222,7 @@ func (p *PluginClientBuilder) HealthCheck(ctx context.Context, interval time.Dur
 
 // MountContent calls the client's Mount() RPC with helpers to format the
 // request and interpret the response.
-func MountContent(ctx context.Context, client v1alpha1.CSIDriverProviderClient, attributes, secrets, permission string, oldObjectVersions map[string]string) (map[string]string, map[string]string, error) {
+func MountContent(ctx context.Context, client v1alpha1.CSIDriverProviderClient, attributes, secrets, permission string, oldObjectVersions map[string]string) (map[string]string, map[string][]byte, error) {
 	var objVersions []*v1alpha1.ObjectVersion
 	for obj, version := range oldObjectVersions {
 		objVersions = append(objVersions, &v1alpha1.ObjectVersion{Id: obj, Version: version})
@@ -235,6 +235,7 @@ func MountContent(ctx context.Context, client v1alpha1.CSIDriverProviderClient, 
 		CurrentObjectVersion: objVersions,
 	}
 
+	klog.InfoS("sending mount request", "request", req)
 	resp, err := client.Mount(ctx, req)
 	if err != nil {
 		if isMaxRecvMsgSizeError(err) {
@@ -242,6 +243,7 @@ func MountContent(ctx context.Context, client v1alpha1.CSIDriverProviderClient, 
 		}
 		return nil, nil, err
 	}
+	klog.InfoS("finished mount request", "response", resp)
 	if resp != nil && resp.GetError() != nil && len(resp.GetError().Code) > 0 {
 		return nil, nil, fmt.Errorf("mount request failed with provider error code %s", resp.GetError().Code)
 	}
@@ -262,9 +264,9 @@ func MountContent(ctx context.Context, client v1alpha1.CSIDriverProviderClient, 
 		klog.InfoS("proto above 1MiB, secret sync may fail", "size", size)
 	}
 
-	files := make(map[string]string, len(resp.GetFiles()))
+	files := make(map[string][]byte, len(resp.GetFiles()))
 	for _, f := range resp.GetFiles() {
-		files[f.GetPath()] = string(f.GetContents())
+		files[f.GetPath()] = f.GetContents()
 	}
 	return objectVersions, files, nil
 }
