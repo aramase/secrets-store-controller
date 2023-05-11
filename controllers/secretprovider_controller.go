@@ -177,7 +177,8 @@ func (r *SecretProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 	}
 
-	return ctrl.Result{}, nil
+	// set the next rotation time
+	return ctrl.Result{RequeueAfter: sp.Spec.RotationPollInterval.Duration}, nil
 }
 
 func (r *SecretProviderReconciler) createOrUpdateSecret(ctx context.Context, name, namespace string, datamap map[string][]byte, secretType corev1.SecretType) error {
